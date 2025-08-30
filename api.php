@@ -146,7 +146,6 @@ try {
     }
 
     if (!$is_tvseries && isset($data['links']) && is_array($data['links'])) {
-        // مرحله ۱: خواندن تمام فایل‌های موجود برای این فیلم از دیتابیس
         $existing_files = [];
         $result = $conn->query("SELECT * FROM video_file WHERE videos_id = {$videos_id}");
         while ($row = $result->fetch_assoc()) {
