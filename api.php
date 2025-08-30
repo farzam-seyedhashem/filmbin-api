@@ -6,8 +6,8 @@ header("Access-Control-Allow-Methods: POST");
 header("Access-Control-Allow-Headers: Content-Type, Access-Control-Allow-Headers, Authorization, X-Requested-With");
 
 define('DB_SERVER', 'localhost');
-define('DB_USERNAME', 'DBUSERNAME');
-define('DB_PASSWORD', 'DBPASSWORD');
+define('DB_USERNAME', 'root');
+define('DB_PASSWORD', 'rootroot');
 define('DB_NAME', 'db92');
 define('API_SECRET_KEY', 'ali');
 
@@ -146,63 +146,101 @@ try {
     }
 
     if (!$is_tvseries && isset($data['links']) && is_array($data['links'])) {
-        $conn->query("DELETE FROM video_file WHERE videos_id = {$videos_id}");
+        // مرحله ۱: خواندن تمام فایل‌های موجود برای این فیلم از دیتابیس
+        $existing_files = [];
+        $result = $conn->query("SELECT * FROM video_file WHERE videos_id = {$videos_id}");
+        while ($row = $result->fetch_assoc()) {
+            $key = $row['quality'] . '_' . $row['dubbed'];
+            $existing_files[$key] = $row;
+        }
+
         foreach ($data['links'] as $link) {
+            $quality = $link['quality'] ?? '';
+            $dubbed = (isset($link['ptype']) && stripos($link['ptype'], 'دوبله') !== false) ? 1 : 0;
+            $key = $quality . '_' . $dubbed;
+
             $file_url_safe = $conn->real_escape_string($link['link_href'] ?? '');
             $label_safe = $conn->real_escape_string($link['label'] ?? '');
-            $quality_safe = $conn->real_escape_string($link['quality'] ?? '');
+            $quality_safe = $conn->real_escape_string($quality);
             $quality_text_safe = $conn->real_escape_string($link['link_quality'] ?? '');
-            $dubbed = (isset($link['ptype']) && stripos($link['ptype'], 'دوبله') !== false) ? 1 : 0;
             $file_size = (int)convertSizeToMB($link['size'] ?? 0, $link['link_size'] ?? null);
             $size_text_safe = $conn->real_escape_string($link['link_size'] ?? '');
 
-            $sql_file = "INSERT INTO video_file (videos_id, file_source, file_url, source_type, label, label_text, quality, quality_text, dubbed, file_size, size_text, site_source, add_datetime) VALUES ({$videos_id}, 'url', '{$file_url_safe}', 'mp4', '{$label_safe}', '{$label_safe}', '{$quality_safe}', '{$quality_text_safe}', {$dubbed}, {$file_size}, '{$size_text_safe}', {$site_source}, NOW())";
-            if (!$conn->query($sql_file)) { throw new Exception("Direct Query Failed (video_file): " . $conn->error); }
+            if (isset($existing_files[$key])) {
+                $file_to_update = $existing_files[$key];
+                $file_id = $file_to_update['video_file_id'];
+
+                $sql_update = "UPDATE video_file SET file_url = '{$file_url_safe}', label = '{$label_safe}', label_text = '{$label_safe}', quality_text = '{$quality_text_safe}', file_size = {$file_size}, size_text = '{$size_text_safe}' WHERE video_file_id = {$file_id}";
+
+                if (!$conn->query($sql_update)) {
+                    throw new Exception("Direct Query Failed (video_file UPDATE): " . $conn->error);
+                }
+            } else {
+                $sql_insert = "INSERT INTO video_file (videos_id, file_source, file_url, source_type, label, label_text, quality, quality_text, dubbed, file_size, size_text, site_source, add_datetime) VALUES ({$videos_id}, 'url', '{$file_url_safe}', 'mp4', '{$label_safe}', '{$label_safe}', '{$quality_safe}', '{$quality_text_safe}', {$dubbed}, {$file_size}, '{$size_text_safe}', {$site_source}, NOW())";
+
+                if (!$conn->query($sql_insert)) {
+                    throw new Exception("Direct Query Failed (video_file INSERT): " . $conn->error);
+                }
+            }
         }
+
     }
 
     if ($is_tvseries && isset($data['seasons']) && is_array($data['seasons'])) {
         foreach ($data['seasons'] as $season_data) {
             $season_num = (int)($season_data['season_number'] ?? 0);
-            $seasons_name_safe = $conn->real_escape_string($season_data['title'] ?? "Season {$season_num}");
             $dubbed = (isset($season_data['ptype']) && stripos($season_data['ptype'], 'دوبله') !== false) ? 1 : 0;
+
+            $seasons_name_safe = $conn->real_escape_string($season_data['title'] ?? "Season {$season_num}");
+            $quality_safe = $conn->real_escape_string($season_data['quality'] ?? '');
+            $quality_text_safe = $conn->real_escape_string($season_data['quality_text'] ?? '');
+            $file_size = isset($season_data['size']) ? intval($season_data['size']) : 0;
+            $size_text_safe = $conn->real_escape_string($season_data['size_text'] ?? '');
 
             $seasons_id = null;
             $stmt_check_season = $conn->prepare("SELECT seasons_id FROM seasons WHERE videos_id = ? AND seasons_num = ? AND dubbed = ?");
             $stmt_check_season->bind_param("iii", $videos_id, $season_num, $dubbed);
             $stmt_check_season->execute();
             $result_season = $stmt_check_season->get_result();
+
             if($result_season->num_rows > 0){
                 $seasons_id = $result_season->fetch_assoc()['seasons_id'];
+                $sql_season_update = "UPDATE seasons SET seasons_name = '{$seasons_name_safe}', quality = '{$quality_safe}', quality_text = '{$quality_text_safe}', file_size = {$file_size}, size_text = '{$size_text_safe}' WHERE seasons_id = {$seasons_id}";
+                if (!$conn->query($sql_season_update)) { throw new Exception("Direct Query Failed (seasons UPDATE): " . $conn->error); }
             } else {
-                $quality_safe = $conn->real_escape_string($season_data['quality'] ?? '');
-                $quality_text_safe = $conn->real_escape_string($season_data['quality_text'] ?? '');
-                $file_size = isset($season_data['size']) ? intval($season_data['size']) : 0;
-                $size_text_safe = $conn->real_escape_string($season_data['size_text'] ?? '');
-
-                $sql_season = "INSERT INTO seasons (videos_id, seasons_name, seasons_num, dubbed, quality, quality_text, file_size, size_text, site_source) VALUES ({$videos_id}, '{$seasons_name_safe}', {$season_num}, {$dubbed}, '{$quality_safe}', '{$quality_text_safe}', {$file_size}, '{$size_text_safe}', {$site_source})";
-                if (!$conn->query($sql_season)) { throw new Exception("Direct Query Failed (seasons): " . $conn->error); }
+                $sql_season_insert = "INSERT INTO seasons (videos_id, seasons_name, seasons_num, dubbed, quality, quality_text, file_size, size_text, site_source) VALUES ({$videos_id}, '{$seasons_name_safe}', {$season_num}, {$dubbed}, '{$quality_safe}', '{$quality_text_safe}', {$file_size}, '{$size_text_safe}', {$site_source})";
+                if (!$conn->query($sql_season_insert)) { throw new Exception("Direct Query Failed (seasons INSERT): " . $conn->error); }
                 $seasons_id = $conn->insert_id;
             }
 
-            $conn->query("DELETE FROM episodes WHERE seasons_id = {$seasons_id}");
-
             if (isset($season_data['links'])) {
+                $existing_episodes = [];
+                $episodes_result = $conn->query("SELECT * FROM episodes WHERE seasons_id = {$seasons_id}");
+                while ($row = $episodes_result->fetch_assoc()) {
+                    $existing_episodes[$row['order']] = $row;
+                }
+
                 $episodes = json_decode($season_data['links'], true);
                 if (is_array($episodes)) {
                     foreach ($episodes as $episode_data) {
-                        $episode_name_safe = $conn->real_escape_string("Episode " . ($episode_data['title'] ?? 'N/A'));
-                        $file_url_safe = $conn->real_escape_string($episode_data['url']);
                         $ep_order = intval($episode_data['title'] ?? 0);
 
-                        $sql_episode = "INSERT INTO episodes (videos_id, seasons_id, episodes_name, file_source, file_url, source_type, `order`, date_added, site_source) VALUES ({$videos_id}, {$seasons_id}, '{$episode_name_safe}', 'url', '{$file_url_safe}', 'mp4', {$ep_order}, NOW(), {$site_source})";
-                        if (!$conn->query($sql_episode)) { throw new Exception("Direct Query Failed (episodes): " . $conn->error); }
+                        $episode_name_safe = $conn->real_escape_string("Episode " . ($episode_data['title'] ?? 'N/A'));
+                        $file_url_safe = $conn->real_escape_string($episode_data['url'] ?? '');
+
+                        if (isset($existing_episodes[$ep_order])) {
+                            $episode_id_to_update = $existing_episodes[$ep_order]['episodes_id'];
+                            $sql_episode_update = "UPDATE episodes SET episodes_name = '{$episode_name_safe}', file_url = '{$file_url_safe}' WHERE episodes_id = {$episode_id_to_update}";
+                            if (!$conn->query($sql_episode_update)) { throw new Exception("Direct Query Failed (episodes UPDATE): " . $conn->error); }
+                        } else {
+                            $sql_episode_insert = "INSERT INTO episodes (videos_id, seasons_id, episodes_name, file_source, file_url, source_type, `order`, date_added, site_source) VALUES ({$videos_id}, {$seasons_id}, '{$episode_name_safe}', 'url', '{$file_url_safe}', 'mp4', {$ep_order}, NOW(), {$site_source})";
+                            if (!$conn->query($sql_episode_insert)) { throw new Exception("Direct Query Failed (episodes INSERT): " . $conn->error); }
+                        }
                     }
                 }
             }
         }
     }
-
     $conn->commit();
     http_response_code(201);
     echo json_encode(['status' => 'success', 'message' => "Video '{$title}' processed successfully.", 'videos_id' => $videos_id]);
