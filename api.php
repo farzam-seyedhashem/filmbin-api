@@ -20,7 +20,8 @@ if ($conn->connect_error) {
 }
 $conn->set_charset("utf8mb4");
 
-function getOrCreateGenreId($conn, $name) {
+function getOrCreateGenreId($conn, $name)
+{
     $name = trim($name);
     $stmt = $conn->prepare("SELECT genre_id FROM genre WHERE name = ?");
     $stmt->bind_param("s", $name);
@@ -38,7 +39,9 @@ function getOrCreateGenreId($conn, $name) {
         return $conn->insert_id;
     }
 }
-function getOrCreateCountryId($conn, $name) {
+
+function getOrCreateCountryId($conn, $name)
+{
     $name = trim($name);
     $stmt = $conn->prepare("SELECT country_id FROM country WHERE name = ?");
     $stmt->bind_param("s", $name);
@@ -55,7 +58,9 @@ function getOrCreateCountryId($conn, $name) {
         return $conn->insert_id;
     }
 }
-function getOrCreateStarId($conn, $name, $type) {
+
+function getOrCreateStarId($conn, $name, $type)
+{
     $name = trim($name);
     $stmt = $conn->prepare("SELECT star_id FROM star WHERE star_name = ? AND star_type = ?");
     $stmt->bind_param("ss", $name, $type);
@@ -71,9 +76,13 @@ function getOrCreateStarId($conn, $name, $type) {
         return $conn->insert_id;
     }
 }
-function convertSizeToMB($sizeStr, $fullSizeText) {
+
+function convertSizeToMB($sizeStr, $fullSizeText)
+{
     $size = floatval($sizeStr);
-    if ($fullSizeText === null) { return round($size); }
+    if ($fullSizeText === null) {
+        return round($size);
+    }
     if (stripos($fullSizeText, 'گیگابایت') !== false || stripos($fullSizeText, 'gb') !== false) {
         return round($size * 1024);
     }
@@ -83,10 +92,14 @@ function convertSizeToMB($sizeStr, $fullSizeText) {
 $data = json_decode(file_get_contents("php://input"), true);
 
 if (!$data || !isset($data['key']) || !isset($data['imdb_id'])) {
-    http_response_code(400); echo json_encode(['status' => 'error', 'message' => 'Invalid or missing input data.']); exit();
+    http_response_code(400);
+    echo json_encode(['status' => 'error', 'message' => 'Invalid or missing input data.']);
+    exit();
 }
 if ($data['key'] !== API_SECRET_KEY) {
-    http_response_code(403); echo json_encode(['status' => 'error', 'message' => 'Forbidden: Invalid API key.']); exit();
+    http_response_code(403);
+    echo json_encode(['status' => 'error', 'message' => 'Forbidden: Invalid API key.']);
+    exit();
 }
 
 $conn->begin_transaction();
@@ -97,14 +110,42 @@ try {
     $description = $data['dsc'] ?? '';
     $rating = $data['rate'] ?? '0';
     $release_year = $data['year'] ?? '';
-    $runtime = isset($data['time']) ? preg_replace('/[^0-9]/', '', $data['time']) : null;
+    $runtime = isset($data['time']) ? preg_replace('/[^0-9]/', '', $data['time']) : '';
     $is_tvseries = isset($data['seasons']) && !empty($data['seasons']) ? 1 : 0;
     $url_source = $data['url'] ?? '';
     $site_source = $data['site_source'] ?? 0;
-    $genre_ids = []; if (!empty($data['ganre'])) { foreach ($data['ganre'] as $genre_name) { $genre_ids[] = getOrCreateGenreId($conn, $genre_name); } }
-    $country_ids = []; if (!empty($data['country'])) { foreach ($data['country'] as $country_name) { $country_ids[] = getOrCreateCountryId($conn, $country_name); } }
-    $director_ids = []; if (!empty($data['director'])) { foreach ($data['director'] as $director_name) { $director_ids[] = getOrCreateStarId($conn, $director_name, 'director'); } }
-    $star_ids = []; if (!empty($data['stars'])) { foreach ($data['stars'] as $star_name) { $star_ids[] = getOrCreateStarId($conn, $star_name, 'actor'); } }
+    $genre_ids = [];
+    if (!empty($data['ganre'])) {
+        foreach ($data['ganre'] as $genre_name) {
+            $genre_ids[] = getOrCreateGenreId($conn, $genre_name);
+        }
+    }
+    $country_ids = [];
+    if (!empty($data['country'])) {
+        foreach ($data['country'] as $country_name) {
+            $country_ids[] = getOrCreateCountryId($conn, $country_name);
+        }
+    }
+    $director_ids = [];
+    if (!empty($data['director'])) {
+        // اگر رشته بود، آن را به آرایه تبدیل کن
+        $directors_array = is_string($data['director']) ? json_decode($data['director'], true) : $data['director'];
+        if (is_array($directors_array)) {
+            foreach ($directors_array as $director_name) {
+                $director_ids[] = getOrCreateStarId($conn, $director_name, 'director');
+            }
+        }
+    }
+    $star_ids = [];
+    if (!empty($data['stars'])) {
+        // اگر رشته بود، آن را به آرایه تبدیل کن
+        $stars_array = is_string($data['stars']) ? json_decode($data['stars'], true) : $data['stars'];
+        if (is_array($stars_array)) {
+            foreach ($stars_array as $star_name) {
+                $star_ids[] = getOrCreateStarId($conn, $star_name, 'actor');
+            }
+        }
+    }
     $genre_str = implode(',', $genre_ids);
     $country_str = implode(',', $country_ids);
     $director_str = implode(',', $director_ids);
@@ -141,44 +182,50 @@ try {
         $last_ep_added_safe = $conn->real_escape_string($last_ep_added);
 
         $sql = "INSERT INTO videos (imdbid, title, seo_title, slug, description, stars, director, rating, `release`, country, genre, runtime, is_tvseries, publication, last_ep_added, url_source, site_source, total_view_admin) VALUES ('{$imdbid_safe}', '{$title_safe}', '{$title_safe}', '{$slug_safe}', '{$description_safe}', '{$stars_str_safe}', '{$director_str_safe}', '{$rating_safe}', '{$release_year_safe}', '{$country_str_safe}', '{$genre_str_safe}', '{$runtime_safe}', {$is_tvseries}, {$publication}, '{$last_ep_added_safe}', '{$url_source_safe}', {$site_source}, {$total_view_admin})";
-        if (!$conn->query($sql)) { throw new Exception("Direct Query Failed (videos): " . $conn->error); }
+        if (!$conn->query($sql)) {
+            throw new Exception("Direct Query Failed (videos): " . $conn->error);
+        }
         $videos_id = $conn->insert_id;
     }
 
-    if (!$is_tvseries && isset($data['links']) && is_array($data['links'])) {
-        $existing_files = [];
-        $result = $conn->query("SELECT * FROM video_file WHERE videos_id = {$videos_id}");
-        while ($row = $result->fetch_assoc()) {
-            $key = $row['quality'] . '_' . $row['dubbed'];
-            $existing_files[$key] = $row;
-        }
+    if (!$is_tvseries && isset($data['links'])) {
+        $links_array = is_string($data['links']) ? json_decode($data['links'], true) : $data['links'];
 
-        foreach ($data['links'] as $link) {
-            $quality = $link['quality'] ?? '';
-            $dubbed = (isset($link['ptype']) && stripos($link['ptype'], 'دوبله') !== false) ? 1 : 0;
-            $key = $quality . '_' . $dubbed;
+        if (is_array($links_array)) {
+            $existing_files = [];
+            $result = $conn->query("SELECT * FROM video_file WHERE videos_id = {$videos_id}");
+            while ($row = $result->fetch_assoc()) {
+                $key = $row['quality'] . '_' . $row['dubbed'];
+                $existing_files[$key] = $row;
+            }
 
-            $file_url_safe = $conn->real_escape_string($link['link_href'] ?? '');
-            $label_safe = $conn->real_escape_string($link['label'] ?? '');
-            $quality_safe = $conn->real_escape_string($quality);
-            $quality_text_safe = $conn->real_escape_string($link['link_quality'] ?? '');
-            $file_size = (int)convertSizeToMB($link['size'] ?? 0, $link['link_size'] ?? null);
-            $size_text_safe = $conn->real_escape_string($link['link_size'] ?? '');
+            foreach ($links_array as $link) {
+                $quality = $link['quality'] ?? '';
+                $dubbed = (isset($link['ptype']) && stripos($link['ptype'], 'دوبله') !== false) ? 1 : 0;
+                $key = $quality . '_' . $dubbed;
 
-            if (isset($existing_files[$key])) {
-                $file_to_update = $existing_files[$key];
-                $file_id = $file_to_update['video_file_id'];
+                $file_url_safe = $conn->real_escape_string($link['link_href'] ?? '');
+                $label_safe = $conn->real_escape_string($link['label'] ?? '');
+                $quality_safe = $conn->real_escape_string($quality);
+                $quality_text_safe = $conn->real_escape_string($link['link_quality'] ?? '');
+                $file_size = (int)convertSizeToMB($link['size'] ?? 0, $link['link_size'] ?? null);
+                $size_text_safe = $conn->real_escape_string($link['link_size'] ?? '');
 
-                $sql_update = "UPDATE video_file SET file_url = '{$file_url_safe}', label = '{$label_safe}', label_text = '{$label_safe}', quality_text = '{$quality_text_safe}', file_size = {$file_size}, size_text = '{$size_text_safe}' WHERE video_file_id = {$file_id}";
+                if (isset($existing_files[$key])) {
+                    $file_to_update = $existing_files[$key];
+                    $file_id = $file_to_update['video_file_id'];
 
-                if (!$conn->query($sql_update)) {
-                    throw new Exception("Direct Query Failed (video_file UPDATE): " . $conn->error);
-                }
-            } else {
-                $sql_insert = "INSERT INTO video_file (videos_id, file_source, file_url, source_type, label, label_text, quality, quality_text, dubbed, file_size, size_text, site_source, add_datetime) VALUES ({$videos_id}, 'url', '{$file_url_safe}', 'mp4', '{$label_safe}', '{$label_safe}', '{$quality_safe}', '{$quality_text_safe}', {$dubbed}, {$file_size}, '{$size_text_safe}', {$site_source}, NOW())";
+                    $sql_update = "UPDATE video_file SET file_url = '{$file_url_safe}', label = '{$label_safe}', label_text = '{$label_safe}', quality_text = '{$quality_text_safe}', file_size = {$file_size}, size_text = '{$size_text_safe}' WHERE video_file_id = {$file_id}";
 
-                if (!$conn->query($sql_insert)) {
-                    throw new Exception("Direct Query Failed (video_file INSERT): " . $conn->error);
+                    if (!$conn->query($sql_update)) {
+                        throw new Exception("Direct Query Failed (video_file UPDATE): " . $conn->error);
+                    }
+                } else {
+                    $sql_insert = "INSERT INTO video_file (videos_id, file_source, file_url, source_type, label, label_text, quality, quality_text, dubbed, file_size, size_text, site_source, add_datetime) VALUES ({$videos_id}, 'url', '{$file_url_safe}', 'mp4', '{$label_safe}', '{$label_safe}', '{$quality_safe}', '{$quality_text_safe}', {$dubbed}, {$file_size}, '{$size_text_safe}', {$site_source}, NOW())";
+
+                    if (!$conn->query($sql_insert)) {
+                        throw new Exception("Direct Query Failed (video_file INSERT): " . $conn->error);
+                    }
                 }
             }
         }
@@ -202,13 +249,17 @@ try {
             $stmt_check_season->execute();
             $result_season = $stmt_check_season->get_result();
 
-            if($result_season->num_rows > 0){
+            if ($result_season->num_rows > 0) {
                 $seasons_id = $result_season->fetch_assoc()['seasons_id'];
                 $sql_season_update = "UPDATE seasons SET seasons_name = '{$seasons_name_safe}', quality = '{$quality_safe}', quality_text = '{$quality_text_safe}', file_size = {$file_size}, size_text = '{$size_text_safe}' WHERE seasons_id = {$seasons_id}";
-                if (!$conn->query($sql_season_update)) { throw new Exception("Direct Query Failed (seasons UPDATE): " . $conn->error); }
+                if (!$conn->query($sql_season_update)) {
+                    throw new Exception("Direct Query Failed (seasons UPDATE): " . $conn->error);
+                }
             } else {
                 $sql_season_insert = "INSERT INTO seasons (videos_id, seasons_name, seasons_num, dubbed, quality, quality_text, file_size, size_text, site_source) VALUES ({$videos_id}, '{$seasons_name_safe}', {$season_num}, {$dubbed}, '{$quality_safe}', '{$quality_text_safe}', {$file_size}, '{$size_text_safe}', {$site_source})";
-                if (!$conn->query($sql_season_insert)) { throw new Exception("Direct Query Failed (seasons INSERT): " . $conn->error); }
+                if (!$conn->query($sql_season_insert)) {
+                    throw new Exception("Direct Query Failed (seasons INSERT): " . $conn->error);
+                }
                 $seasons_id = $conn->insert_id;
             }
 
@@ -219,7 +270,7 @@ try {
                     $existing_episodes[$row['order']] = $row;
                 }
 
-                $episodes = json_decode($season_data['links'], true);
+                $episodes = is_string($season_data['links']) ? json_decode($season_data['links'], true) : $season_data['links'];
                 if (is_array($episodes)) {
                     foreach ($episodes as $episode_data) {
                         $ep_order = intval($episode_data['title'] ?? 0);
@@ -230,10 +281,14 @@ try {
                         if (isset($existing_episodes[$ep_order])) {
                             $episode_id_to_update = $existing_episodes[$ep_order]['episodes_id'];
                             $sql_episode_update = "UPDATE episodes SET episodes_name = '{$episode_name_safe}', file_url = '{$file_url_safe}' WHERE episodes_id = {$episode_id_to_update}";
-                            if (!$conn->query($sql_episode_update)) { throw new Exception("Direct Query Failed (episodes UPDATE): " . $conn->error); }
+                            if (!$conn->query($sql_episode_update)) {
+                                throw new Exception("Direct Query Failed (episodes UPDATE): " . $conn->error);
+                            }
                         } else {
                             $sql_episode_insert = "INSERT INTO episodes (videos_id, seasons_id, episodes_name, file_source, file_url, source_type, `order`, date_added, site_source) VALUES ({$videos_id}, {$seasons_id}, '{$episode_name_safe}', 'url', '{$file_url_safe}', 'mp4', {$ep_order}, NOW(), {$site_source})";
-                            if (!$conn->query($sql_episode_insert)) { throw new Exception("Direct Query Failed (episodes INSERT): " . $conn->error); }
+                            if (!$conn->query($sql_episode_insert)) {
+                                throw new Exception("Direct Query Failed (episodes INSERT): " . $conn->error);
+                            }
                         }
                     }
                 }
